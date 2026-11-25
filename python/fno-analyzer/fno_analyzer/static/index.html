@@ -233,6 +233,7 @@ td.strike { text-align: center; font-weight: 600; background: var(--surface-2); 
       </div>
       <button class="btn" id="go" type="submit">Analyze</button>
     </form>
+    <div id="mode-note" class="notice hidden">Running fully in your browser (Python via WebAssembly — the first load downloads about 10 MB). Live NSE data needs the local version: <code>python3 -m fno_analyzer serve</code>. You can still upload a CSV or a saved NSE JSON file — nothing leaves your device.</div>
     <div id="src-note" class="notice hidden"></div>
     <div id="err" class="error hidden" role="alert"></div>
   </section>
@@ -457,8 +458,50 @@ $$("nav.tabs button").forEach(b => b.addEventListener("click", () => {
 }));
 
 // ---------- api ----------
+// Two back ends: the local Python server (python3 -m fno_analyzer serve), or — on a
+// static host such as GitHub Pages — the same Python package running in the browser
+// via Pyodide (WebAssembly). Mode is detected once at startup.
+const PYODIDE_URL = "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/";
+const PY_FILES = ["__init__", "api", "chain", "config", "futures", "insights", "presets", "pricing", "sample", "strategy"];
+let MODE = null;         // "server" | "browser"
+let pyCall = null;
+
+async function detectMode() {
+  if (MODE) return MODE;
+  if (location.protocol === "file:" || location.hostname.endsWith("github.io")) return (MODE = "browser");
+  try {
+    const r = await fetch("api/meta", { cache: "no-store" });
+    MODE = r.ok && (r.headers.get("content-type") || "").includes("json") ? "server" : "browser";
+  } catch (e) { MODE = "browser"; }
+  return MODE;
+}
+function loadScript(src) {
+  return new Promise((ok, bad) => { const s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = () => bad(new Error("Could not load " + src)); document.head.append(s); });
+}
+let pyLoading = null;
+function loadPython() {
+  if (!pyLoading) pyLoading = (async () => {
+    await loadScript(PYODIDE_URL + "pyodide.js");
+    const py = await loadPyodide({ indexURL: PYODIDE_URL });
+    py.FS.mkdirTree("/app/fno_analyzer");
+    await Promise.all(PY_FILES.map(async f => {
+      const r = await fetch(`py/fno_analyzer/${f}.py`);
+      if (!r.ok) throw new Error(`Missing py/fno_analyzer/${f}.py (${r.status})`);
+      py.FS.writeFile(`/app/fno_analyzer/${f}.py`, await r.text());
+    }));
+    py.runPython("import sys; sys.path.insert(0, '/app')");
+    pyCall = py.runPython("import fno_analyzer.api as _api; _api.call");
+  })().catch(e => { pyLoading = null; throw e; });
+  return pyLoading;
+}
 async function api(path, body) {
-  const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if ((await detectMode()) === "browser") {
+    if (!pyCall) await loadPython();
+    const out = JSON.parse(pyCall(path, JSON.stringify(body)));
+    if (!out.ok) throw new Error(out.error);
+    return out.data;
+  }
+  const res = await fetch(path.replace(/^\//, ""), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   let data;
   try { data = await res.json(); } catch (e) { throw new Error(`Server error (${res.status})`); }
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
@@ -469,7 +512,7 @@ const showErr = (box, msg) => { box.textContent = msg; box.classList.toggle("hid
 // ---------- source form ----------
 const NOTES = {
   live: "Live data is fetched from nseindia.com by the server on your computer. NSE sometimes blocks automated requests, VPNs and cloud servers — if it fails, use Upload saved NSE JSON or CSV.",
-  csv: "CSV header: strike, call_ltp, call_iv, call_oi, call_oi_change, call_volume, put_ltp, put_iv, put_oi, put_oi_change, put_volume (IV in %, optional — solved from LTP if blank). See data/sample_chain.csv.",
+  csv: "CSV header: strike, call_ltp, call_iv, call_oi, call_oi_change, call_volume, put_ltp, put_iv, put_oi, put_oi_change, put_volume (IV in %, optional — solved from LTP if blank). Example: sample_chain.csv in the project's data folder.",
   json: "Open nseindia.com/option-chain in your browser, then in DevTools → Network save the response of the option-chain API request as a .json file.",
 };
 function syncSource() {
@@ -506,6 +549,7 @@ $("#src-form").addEventListener("submit", async ev => {
   if (s === "csv") { body.spot = $("#spot").value; body.as_of = $("#asof").value || null; }
   showErr($("#err"), "");
   btn.disabled = true; btn.replaceChildren(el("span", { class: "spin" }), " Analyzing");
+  if ((await detectMode()) === "browser" && !pyCall) btn.replaceChildren(el("span", { class: "spin" }), " Loading Python engine…");
   try {
     if (s === "csv" || s === "json") {
       const f = $("#file").files[0];
@@ -965,8 +1009,14 @@ function redraw() {
 let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(redraw, 150); });
 matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", redraw);
 
-// initial load with sample data
-$("#src-form").requestSubmit();
+// startup: pick back end, then load sample data
+detectMode().then(mode => {
+  if (mode === "browser") {
+    $("#source option[value=live]").remove();
+    $("#mode-note").classList.remove("hidden");
+  }
+  $("#src-form").requestSubmit();
+});
 })();
 </script>
 </body>

@@ -7,7 +7,7 @@ A collection of small beginner-friendly projects.
 | [Calculator](python/calculator) | Python | `python3 python/calculator/calculator.py` |
 | [Number Guessing Game](python/number-guessing) | Python | `python3 python/number-guessing/guess.py` |
 | [To-Do CLI](python/todo-cli) | Python | `python3 python/todo-cli/todo.py add "Buy milk"` |
-| [F&O Analyzer (Indian markets)](python/fno-analyzer) | Python | `cd python/fno-analyzer && python3 -m fno_analyzer serve --open` (dashboard) |
+| [F&O Analyzer (Indian markets)](python/fno-analyzer) — [live demo](https://jiveshkaushal.github.io/basic-projects/) | Python | `cd python/fno-analyzer && python3 -m fno_analyzer serve --open` (dashboard) |
 | [Counter App](web/counter-app) | HTML/CSS/JS | open `web/counter-app/index.html` in a browser |
 
 No dependencies needed — just Python 3 and a web browser.

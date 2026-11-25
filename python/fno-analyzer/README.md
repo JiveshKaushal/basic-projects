@@ -19,6 +19,18 @@ FINNIFTY, MIDCPNIFTY, SENSEX and stocks). It reads an option chain and gives you
 
 Pure Python 3.8+ standard library — **no installs needed**.
 
+## Try it online
+
+**https://jiveshkaushal.github.io/basic-projects/** — the dashboard running entirely in your
+browser (the Python code runs via Pyodide/WebAssembly; first load downloads ~10 MB).
+Sample data, CSV upload and saved-NSE-JSON upload all work there and nothing leaves your
+device. Live NSE fetching needs the local version below, because browsers block direct
+requests to nseindia.com.
+
+The site is rebuilt and deployed automatically by `.github/workflows/pages.yml` whenever
+`python/fno-analyzer/` changes on `main` (tests run first). To preview the static build
+locally: `./build_site.sh && python3 -m http.server -d _site 8080`.
+
 ## Web dashboard
 
 ```bash

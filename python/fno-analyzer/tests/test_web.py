@@ -5,7 +5,8 @@ import unittest
 import urllib.request
 from http.server import ThreadingHTTPServer
 
-from fno_analyzer.web import Handler, api_analyze, api_futures, api_price, api_strategy
+from fno_analyzer.api import api_analyze, api_futures, api_price, api_strategy
+from fno_analyzer.web import Handler
 
 DATA = os.path.join(os.path.dirname(__file__), "..", "data", "sample_chain.csv")
 
