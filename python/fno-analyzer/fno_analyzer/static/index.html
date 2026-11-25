@@ -179,6 +179,13 @@ td.strike { text-align: center; font-weight: 600; background: var(--surface-2); 
 .live-status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-2); }
 .live-status.on .dot { background: var(--good); }
 .live-status.off .dot { background: var(--bad); }
+.view-bar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.payoff-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+.mini { cursor: pointer; padding: 14px 14px 10px; }
+.mini:hover, .mini:focus-visible { border-color: var(--accent); outline: none; }
+.mini .mh { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.mini .mh h3 { margin: 0; font-size: 14px; }
+.mini .ms { font-size: 12px; color: var(--text-2); margin: 2px 0 6px; font-variant-numeric: tabular-nums; }
 .disclaimer { margin-top: 18px; color: var(--text-2); font-size: 12px; }
 .muted { color: var(--text-2); }
 .empty { color: var(--text-2); text-align: center; padding: 40px 0; }
@@ -329,7 +336,31 @@ td.strike { text-align: center; font-weight: 600; background: var(--surface-2); 
 
   <!-- STRATEGIES -->
   <section data-panel="strategies" class="hidden">
-    <div class="grid main-side">
+    <div class="view-bar">
+      <div class="seg" role="group" aria-label="Strategies view">
+        <button type="button" aria-pressed="true" data-sview="table">Table &amp; detail</button>
+        <button type="button" aria-pressed="false" data-sview="charts">All payoff charts</button>
+      </div>
+      <div class="seg charts-only hidden" role="group" aria-label="P&amp;L scale">
+        <button type="button" aria-pressed="true" data-yscale="own">Own P&amp;L scale</button>
+        <button type="button" aria-pressed="false" data-yscale="shared">Same P&amp;L scale</button>
+      </div>
+    </div>
+    <div id="strat-charts" class="hidden">
+      <div class="card" style="margin-bottom:12px;padding:12px 16px">
+        <div class="legend" style="margin:0">
+          <span><i style="background:var(--accent)"></i>P&amp;L at expiry (1 lot)</span>
+          <span><i class="box" style="background:var(--good);opacity:.35"></i>Profit zone</span>
+          <span><i class="box" style="background:var(--bad);opacity:.35"></i>Loss zone</span>
+          <span><i class="box" style="background:var(--band);outline:1px solid var(--grid)"></i>1-SD range</span>
+          <span><i class="dash" style="border-color:var(--text)"></i>Spot</span>
+          <span><i class="dash" style="border-color:var(--text-2)"></i>Breakeven</span>
+        </div>
+        <p class="sub-title" style="margin:6px 0 0">Same price axis on every chart, in the order of the table. Hover for P&amp;L at any price; click a chart for full details.</p>
+      </div>
+      <div class="payoff-grid" id="payoff-grid"></div>
+    </div>
+    <div class="grid main-side" id="strat-table-view">
       <div class="card">
         <h2>Strategies ranked by probability of profit</h2>
         <p class="sub-title">One lot each, held to expiry, built from the current chain. Click a row for its payoff.</p>
@@ -858,28 +889,29 @@ $$("[data-oi]").forEach(b => b.addEventListener("click", () => {
 }));
 
 // ---------- line chart (shared by IV smile and payoff) ----------
-function lineChart(box, { series, xFmt, yFmt, height, zeroLine, bands = [], markers = [], fills, ariaLabel, tipTitle }) {
+function lineChart(box, { series, xFmt, yFmt, height, zeroLine, bands = [], markers = [], fills, ariaLabel, tipTitle, xDomain, yDomain, compact }) {
   box.replaceChildren();
   const W = box.clientWidth || 600, H = height || Math.max(220, Math.min(320, W * 0.48));
-  const m = { t: 14, r: 12, b: 30, l: 58 };
+  const m = compact ? { t: 8, r: 8, b: 24, l: 46 } : { t: 14, r: 12, b: 30, l: 58 };
   const xs = series.flatMap(s => s.pts.map(p => p[0]));
   const ys = series.flatMap(s => s.pts.map(p => p[1]));
-  let ylo = Math.min(...ys), yhi = Math.max(...ys);
+  let [ylo, yhi] = yDomain || [Math.min(...ys), Math.max(...ys)];
   if (zeroLine) { ylo = Math.min(ylo, 0); yhi = Math.max(yhi, 0); }
   const pad = (yhi - ylo) * 0.08 || Math.abs(yhi) * 0.1 || 1;
   ylo -= pad; yhi += pad;
-  const x = lin(Math.min(...xs), Math.max(...xs), m.l, W - m.r), y = lin(ylo, yhi, H - m.b, m.t);
+  const [xlo, xhi] = xDomain || [Math.min(...xs), Math.max(...xs)];
+  const x = lin(xlo, xhi, m.l, W - m.r), y = lin(ylo, yhi, H - m.b, m.t);
   const svg = sv("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img", "aria-label": ariaLabel || "chart" });
   for (const b of bands) {
     const x0 = Math.max(x(b.from), m.l), x1 = Math.min(x(b.to), W - m.r);
     if (x1 > x0) svg.append(sv("rect", { x: x0, y: m.t, width: x1 - x0, height: H - m.t - m.b, fill: b.color }));
     if (b.label) { const tx = sv("text", { x: (x0 + x1) / 2, y: H - m.b - 6, "text-anchor": "middle" }); tx.textContent = b.label; svg.append(tx); }
   }
-  for (const t of niceTicks(ylo, yhi, 5)) {
+  for (const t of niceTicks(ylo, yhi, compact ? 4 : 5)) {
     svg.append(sv("line", { x1: m.l, x2: W - m.r, y1: y(t), y2: y(t), stroke: css("--grid") }));
     const tx = sv("text", { x: m.l - 6, y: y(t) + 4, "text-anchor": "end" }); tx.textContent = yFmt(t); svg.append(tx);
   }
-  for (const t of niceTicks(x.inv(m.l), x.inv(W - m.r), Math.max(3, Math.floor(W / 110)))) {
+  for (const t of niceTicks(x.inv(m.l), x.inv(W - m.r), Math.max(compact ? 2 : 3, Math.floor(W / (compact ? 130 : 110))))) {
     const tx = sv("text", { x: x(t), y: H - m.b + 18, "text-anchor": "middle" }); tx.textContent = xFmt(t); svg.append(tx);
   }
   if (zeroLine) svg.append(sv("line", { x1: m.l, x2: W - m.r, y1: y(0), y2: y(0), stroke: css("--axis"), "stroke-width": 1 }));
@@ -987,6 +1019,77 @@ function sortedStrategies() {
   };
   return [...DATA.strategies].sort((a, b) => { const A = val(a), B = val(b); return (A > B ? 1 : A < B ? -1 : 0) * sortDir; });
 }
+// ---------- all payoff charts (small multiples) ----------
+let stratView = "table", yScale = "own";
+// Payoffs are linear beyond the outermost strike, so a curve can be extended exactly.
+function extendCurve(pts, lo, hi) {
+  const out = pts.slice();
+  if (out.length > 1 && lo < out[0][0]) {
+    const [a, b] = out, k = (b[1] - a[1]) / (b[0] - a[0]);
+    out.unshift([lo, a[1] - k * (a[0] - lo)]);
+  }
+  const n = out.length;
+  if (n > 1 && hi > out[n - 1][0]) {
+    const a = out[n - 2], b = out[n - 1], k = (b[1] - a[1]) / (b[0] - a[0]);
+    out.push([hi, b[1] + k * (hi - b[0])]);
+  }
+  return out.filter(p => p[0] >= lo && p[0] <= hi);
+}
+function renderPayoffGrid() {
+  const grid = $("#payoff-grid");
+  if (!DATA) return grid.replaceChildren();
+  const list = sortedStrategies();
+  const lo = Math.min(...list.map(s => s.curve[0][0]));
+  const hi = Math.max(...list.map(s => s.curve[s.curve.length - 1][0]));
+  const curves = new Map(list.map(s => [s, extendCurve(s.curve, lo, hi)]));
+  let yDomain = null;
+  if (yScale === "shared") {
+    const ys = [...curves.values()].flatMap(c => c.map(p => p[1]));
+    yDomain = [Math.min(...ys), Math.max(...ys)];
+  }
+  const cards = list.map(s => {
+    const idx = DATA.strategies.indexOf(s);
+    const chart = el("div", { class: "chart" });
+    const open = () => { selectedStrategy = idx; setStratView("table"); renderStrategies(); $("#strat-detail").scrollIntoView({ behavior: "smooth", block: "nearest" }); };
+    const card = el("div", { class: "card mini", tabindex: 0, role: "button", "aria-label": `${s.name}: probability of profit ${pct(s.pop)}. Open details.` },
+      el("div", { class: "mh" }, el("h3", {}, s.name), el("span", { class: "pill" }, "POP " + pct(s.pop))),
+      el("div", { class: "ms" },
+        el("span", { class: "pos" }, "Max " + rs(s.max_profit, s.unlimited_profit)), " · ",
+        el("span", { class: "neg" }, "Max loss " + (s.unlimited_loss ? "Unlimited" : rs(s.max_loss))), " · ",
+        "BE " + (s.breakevens.length ? s.breakevens.map(b => num(b)).join(" / ") : "—")),
+      chart);
+    card.addEventListener("click", open);
+    card.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
+    return [card, chart, s];
+  });
+  grid.replaceChildren(...cards.map(c => c[0]));
+  requestAnimationFrame(() => cards.forEach(([, chart, s]) => lineChart(chart, {
+    series: [{ name: "P&L", color: css("--accent"), pts: curves.get(s) }],
+    xFmt: v => Math.round(v), yFmt: (v, full) => full ? rs(v) : compact(v),
+    zeroLine: true, fills: true, compact: true, height: 170,
+    xDomain: [lo, hi], yDomain,
+    bands: [{ from: DATA.range_1sd[0], to: DATA.range_1sd[1], color: css("--band") }],
+    markers: [{ x: DATA.spot, color: css("--text") }, ...s.breakevens.map(b => ({ x: b, color: css("--text-2"), dash: "2 3" }))],
+    ariaLabel: `Payoff at expiry for ${s.name}`, tipTitle: v => `${DATA.symbol} at ${num(v)}`,
+  })));
+}
+function setStratView(v) {
+  stratView = v;
+  $$("[data-sview]").forEach(b => b.setAttribute("aria-pressed", b.dataset.sview === v));
+  $("#strat-charts").classList.toggle("hidden", v !== "charts");
+  $("#strat-table-view").classList.toggle("hidden", v !== "table");
+  $$(".charts-only").forEach(e => e.classList.toggle("hidden", v !== "charts"));
+  try { localStorage.setItem("fno-sview", v); } catch (e) {}
+  if (v === "charts") renderPayoffGrid();
+}
+$$("[data-sview]").forEach(b => b.addEventListener("click", () => setStratView(b.dataset.sview)));
+$$("[data-yscale]").forEach(b => b.addEventListener("click", () => {
+  yScale = b.dataset.yscale;
+  $$("[data-yscale]").forEach(x => x.setAttribute("aria-pressed", x === b));
+  renderPayoffGrid();
+}));
+try { const v = localStorage.getItem("fno-sview"); if (v === "charts") setStratView("charts"); } catch (e) {}
+
 function renderStrategies() {
   const tb = $("#strat-table tbody");
   const list = sortedStrategies();
@@ -1197,7 +1300,10 @@ function redraw() {
   if (!DATA) return;
   const vis = p => !$(`[data-panel=${p}]`).classList.contains("hidden");
   if (vis("overview")) { drawOI(); drawIV(); }
-  if (vis("strategies")) renderDetail($("#strat-detail"), DATA.strategies[selectedStrategy], DATA, true);
+  if (vis("strategies")) {
+    if (stratView === "charts") renderPayoffGrid();
+    else renderDetail($("#strat-detail"), DATA.strategies[selectedStrategy], DATA, true);
+  }
   if (vis("builder") && $$("#legs .leg-row").length && $("#b-detail .chart")) $("#b-form").requestSubmit();
   if (vis("chain")) renderChain();
 }

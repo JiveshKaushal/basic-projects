@@ -59,6 +59,8 @@ The dashboard has five tabs:
   the volatility smile, the market read, and the expected range to expiry.
 - **Strategies & POP** — the preset strategies ranked by probability of profit (sortable);
   click one to see its payoff chart with profit/loss zones, breakevens and the 1-SD range.
+  Switch to **All payoff charts** to see every strategy's payoff side by side on the same
+  price axis (optionally the same P&L scale too); click any chart for its full details.
 - **Strategy builder** — add your own legs, fill premiums from the chain, and calculate.
 - **Option chain** — the full chain with ITM shading and the ATM strike highlighted.
 - **Futures & pricer** — futures basis/carry/buildup and a single-option pricer.
@@ -74,6 +76,9 @@ cd python/fno-analyzer
 
 # Demo on built-in synthetic data
 python3 -m fno_analyzer analyze --sample
+
+# Add --details for each strategy's legs, Greeks and a P&L-at-expiry chart
+python3 -m fno_analyzer analyze --sample --details
 
 # Live NSE data (run on your own machine; NSE may block cloud servers/VPNs)
 python3 -m fno_analyzer analyze --live --symbol NIFTY

@@ -58,6 +58,18 @@ def print_report(rep, show_legs=True):
           f"Θ {rupees(g['theta'])}/day  Vega {rupees(g['vega'])}/vol-pt")
 
 
+def print_payoff_chart(strat, spot, iv, T, width=30):
+    """Text bar chart of P&L at expiry from -2 to +2 standard deviations."""
+    em = spot * iv * math.sqrt(T)
+    rows = [(k, spot + k * em / 2) for k in range(-4, 5)]
+    pnls = [strat.payoff(S) for _, S in rows]
+    scale = max(abs(p) for p in pnls) or 1
+    for (k, S), pnl in zip(rows, pnls):
+        bar = "█" * round(abs(pnl) / scale * width)
+        left, right = (bar.rjust(width), "") if pnl < 0 else ("".rjust(width), bar)
+        print(f"  {S:>10,.0f} ({k * 0.5:+.1f} SD)  {rupees(pnl):>10}  {left}│{right}")
+
+
 def load_chain(args):
     if args.sample:
         return sample_chain(args.symbol, days=args.days or 6)
@@ -124,6 +136,8 @@ def cmd_analyze(args):
         for rep in reports:
             hr(rep.strategy.name)
             print_report(rep)
+            print("  P&L at expiry:")
+            print_payoff_chart(rep.strategy, chain.spot, iv, chain.T)
 
     hr()
     print("  " + DISCLAIMER)
@@ -141,14 +155,7 @@ def cmd_strategy(args):
     hr(f"{args.name} — {args.symbol.upper()} (lot {lots})")
     print_report(rep)
     hr("P&L at expiry")
-    em = args.spot * iv * math.sqrt(T)
-    rows = [(k, args.spot + k * em / 2) for k in range(-4, 5)]
-    pnls = [strat.payoff(S) for _, S in rows]
-    scale = max(abs(p) for p in pnls) or 1
-    for (k, S), pnl in zip(rows, pnls):
-        bar = "█" * round(abs(pnl) / scale * 30)
-        left, right = (bar.rjust(30), "") if pnl < 0 else ("".rjust(30), bar)
-        print(f"  {S:>10,.0f} ({k * 0.5:+.1f} SD)  {rupees(pnl):>10}  {left}│{right}")
+    print_payoff_chart(strat, args.spot, iv, T)
     hr()
     print("  " + DISCLAIMER)
 
