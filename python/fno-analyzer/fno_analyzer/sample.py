@@ -30,9 +30,10 @@ def sample_chain(symbol: str = "NIFTY", days: int = 6, seed: int = 7,
         dist = (K - spot) / (spot * 0.03)
         call_oi = roundness * 1e5 * math.exp(-((dist - 0.8) ** 2) / 1.2) * rng.uniform(0.8, 1.2)
         put_oi = roundness * 1.15e5 * math.exp(-((dist + 0.8) ** 2) / 1.2) * rng.uniform(0.8, 1.2)
-        quote = lambda kind, oi: Quote(
-            ltp=round(max(bs_price(spot, K, T, r, iv, kind), 0.05), 2),
-            iv=round(iv, 4),
+        # puts usually trade a little richer than calls at the same strike
+        quote = lambda kind, oi, v=iv: Quote(
+            ltp=round(max(bs_price(spot, K, T, r, v + (0.0015 if kind == "put" else -0.0015), kind), 0.05), 2),
+            iv=round(v + (0.0015 if kind == "put" else -0.0015), 4),
             oi=round(oi),
             oi_change=round(oi * rng.uniform(-0.15, 0.35)),
             volume=round(oi * rng.uniform(2, 6)),

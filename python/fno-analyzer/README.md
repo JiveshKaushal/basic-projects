@@ -15,8 +15,31 @@ FINNIFTY, MIDCPNIFTY, SENSEX and stocks). It reads an option chain and gives you
   (long buildup, short buildup, short covering, long unwinding).
 - **Option pricer** — Black-Scholes price, Greeks, implied volatility and probability of
   expiring in the money.
+- **Web dashboard** — all of the above in your browser, with interactive charts.
 
 Pure Python 3.8+ standard library — **no installs needed**.
+
+## Web dashboard
+
+```bash
+cd python/fno-analyzer
+python3 -m fno_analyzer serve --open      # opens http://127.0.0.1:8000
+```
+
+The dashboard has five tabs:
+
+- **Overview** — key numbers (spot, ATM IV, PCR, max pain, support/resistance, bias), an
+  open-interest-by-strike chart (total or today's change) with spot and max pain marked,
+  the volatility smile, the market read, and the expected range to expiry.
+- **Strategies & POP** — the preset strategies ranked by probability of profit (sortable);
+  click one to see its payoff chart with profit/loss zones, breakevens and the 1-SD range.
+- **Strategy builder** — add your own legs, fill premiums from the chain, and calculate.
+- **Option chain** — the full chain with ITM shading and the ATM strike highlighted.
+- **Futures & pricer** — futures basis/carry/buildup and a single-option pricer.
+
+Choose the data source at the top: sample data, live NSE, an uploaded CSV, or a saved NSE
+JSON file. Light and dark themes are supported. The server only listens on your own
+computer (127.0.0.1) and uses no external libraries or CDNs.
 
 ## Quick start
 

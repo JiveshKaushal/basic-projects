@@ -5,6 +5,7 @@
   python -m fno_analyzer strategy --spot 24350 --iv 13 --days 6 --leg "SELL CE 24800 @ 40" --leg "SELL PE 23900 @ 45"
   python -m fno_analyzer futures --spot 24350 --future 24420 --days 20
   python -m fno_analyzer price --spot 24350 --strike 24500 --days 6 --iv 13 --type call
+  python -m fno_analyzer serve --open        # web dashboard
 """
 import argparse
 import math
@@ -195,6 +196,11 @@ def cmd_price(args):
     print(f"  Probability of expiring ITM: {prob_itm(args.spot, args.strike, T, args.rate, iv, args.type) * 100:.1f}%")
 
 
+def cmd_serve(args):
+    from .web import serve
+    serve(args.host, args.port, args.open, args.verbose)
+
+
 def build_parser():
     p = argparse.ArgumentParser(prog="fno_analyzer", description="Indian F&O analysis tool")
     p.add_argument("--version", action="version", version=__version__)
@@ -250,6 +256,13 @@ def build_parser():
     pr.add_argument("--premium", type=float, help="market premium (solves IV)")
     pr.add_argument("--rate", type=float, default=DEFAULT_RISK_FREE_RATE)
     pr.set_defaults(func=cmd_price)
+
+    w = sub.add_parser("serve", help="start the web dashboard")
+    w.add_argument("--host", default="127.0.0.1")
+    w.add_argument("--port", type=int, default=8000)
+    w.add_argument("--open", action="store_true", help="open in your browser")
+    w.add_argument("--verbose", action="store_true", help="log every request")
+    w.set_defaults(func=cmd_serve)
     return p
 
 

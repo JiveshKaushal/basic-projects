@@ -1,5 +1,6 @@
 """Option chain model, loaders (NSE JSON, CSV, live NSE) and chain analytics."""
 import csv
+import io
 import json
 import math
 import urllib.request
@@ -217,20 +218,30 @@ def from_csv(path: str, symbol: str, spot: float, expiry: str, as_of: Optional[s
 
     IV in percent (e.g. 13.5). Missing IV columns are back-solved from LTP.
     """
+    with open(path, newline="") as fh:
+        return from_csv_text(fh.read(), symbol, spot, expiry, as_of, rate)
+
+
+def from_csv_text(text: str, symbol: str, spot: float, expiry: str, as_of: Optional[str] = None,
+                  rate: float = DEFAULT_RISK_FREE_RATE) -> OptionChain:
+    """Same as from_csv but takes the CSV content as a string."""
     def f(row, k):
         v = (row.get(k) or "").replace(",", "").strip()
         return float(v) if v not in ("", "-") else 0.0
 
     rows = []
-    with open(path, newline="") as fh:
-        for row in csv.DictReader(fh):
-            rows.append(StrikeRow(
-                f(row, "strike"),
-                Quote(f(row, "call_ltp"), f(row, "call_iv") / 100, f(row, "call_oi"),
-                      f(row, "call_oi_change"), f(row, "call_volume")),
-                Quote(f(row, "put_ltp"), f(row, "put_iv") / 100, f(row, "put_oi"),
-                      f(row, "put_oi_change"), f(row, "put_volume")),
-            ))
+    for row in csv.DictReader(io.StringIO(text.lstrip("\ufeff"))):
+        if not (row.get("strike") or "").strip():
+            continue
+        rows.append(StrikeRow(
+            f(row, "strike"),
+            Quote(f(row, "call_ltp"), f(row, "call_iv") / 100, f(row, "call_oi"),
+                  f(row, "call_oi_change"), f(row, "call_volume")),
+            Quote(f(row, "put_ltp"), f(row, "put_iv") / 100, f(row, "put_oi"),
+                  f(row, "put_oi_change"), f(row, "put_volume")),
+        ))
+    if not rows:
+        raise ValueError("CSV has no rows with a 'strike' column")
     return OptionChain(symbol.upper(), spot, _parse_date(expiry), rows,
                        as_of=_parse_date(as_of) if as_of else date.today(), rate=rate)
 
