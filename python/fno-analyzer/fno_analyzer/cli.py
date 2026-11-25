@@ -203,6 +203,32 @@ def cmd_price(args):
     print(f"  Probability of expiring ITM: {prob_itm(args.spot, args.strike, T, args.rate, iv, args.type) * 100:.1f}%")
 
 
+def cmd_ivp(args):
+    from . import ivhistory as ivh
+    if args.csv:
+        with open(args.csv) as fh:
+            series = ivh.parse_csv(fh.read())
+        basis = args.csv
+    elif args.json:
+        with open(args.json) as fh:
+            series = ivh.parse_nse_json(fh.read())
+        basis = "India VIX (" + args.json + ")"
+    elif args.live:
+        series = ivh.fetch_nse_vix(args.lookback)
+        basis = "India VIX (live from NSE)"
+    else:
+        series = ivh.sample_history(args.current or 13.0)
+        basis = "SAMPLE synthetic history"
+    st = ivh.iv_stats(series, args.current, lookback_days=args.lookback)
+    hr(f"IV percentile — {basis}")
+    print(f"  Current IV     : {st['current']:.2f}")
+    print(f"  IV percentile  : {st['percentile']:.0f}  ({st['regime']})")
+    print(f"  IV rank        : {st['rank']:.0f}")
+    print(f"  Range          : {st['low']:.2f} – {st['high']:.2f}  (mean {st['mean']:.2f}, {st['days']} days "
+          f"from {st['start']} to {st['end']})")
+    print(f"  Read           : {st['read']}")
+
+
 def cmd_serve(args):
     from .web import serve
     serve(args.host, args.port, args.open, args.verbose)
@@ -263,6 +289,15 @@ def build_parser():
     pr.add_argument("--premium", type=float, help="market premium (solves IV)")
     pr.add_argument("--rate", type=float, default=DEFAULT_RISK_FREE_RATE)
     pr.set_defaults(func=cmd_price)
+
+    v = sub.add_parser("ivp", help="IV percentile & rank from VIX / IV history")
+    vsrc = v.add_mutually_exclusive_group()
+    vsrc.add_argument("--csv", help="history CSV (NSE India VIX download, or date + iv columns)")
+    vsrc.add_argument("--json", help="saved NSE VIX history JSON")
+    vsrc.add_argument("--live", action="store_true", help="fetch India VIX history from NSE")
+    v.add_argument("--current", type=float, help="IV to rank, in %% (default: latest in history)")
+    v.add_argument("--lookback", type=int, default=365, help="look-back window in days")
+    v.set_defaults(func=cmd_ivp)
 
     w = sub.add_parser("serve", help="start the web dashboard")
     w.add_argument("--host", default="127.0.0.1")

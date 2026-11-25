@@ -217,11 +217,53 @@ def api_price(p: dict):
     }
 
 
+def api_ivhistory(p: dict):
+    """IV percentile / rank from a history source.
+
+    source: sample | live (NSE India VIX, local server only) | csv | json | series
+    series: [[YYYY-MM-DD, iv_percent], ...] (e.g. the dashboard's recorded ATM IV)
+    current: optional IV in percent points to rank (default: latest history value)
+    """
+    from datetime import date, timedelta
+    from . import ivhistory as ivh
+
+    source = (p.get("source") or "sample").lower()
+    lookback = _f(p, "lookback", 365, int)
+    current = _f(p, "current")
+    as_of = ivh.parse_day(p["as_of"]) if p.get("as_of") else None
+    basis = "India VIX"
+    if source == "sample":
+        series = ivh.sample_history(current or 13.0, as_of or date.today())
+        basis = "Sample VIX-like history (synthetic)"
+    elif source == "live":
+        series = ivh.fetch_nse_vix(lookback)
+    elif source == "csv":
+        if not p.get("csv"):
+            raise ValueError("Choose a VIX history CSV file.")
+        series = ivh.parse_csv(p["csv"])
+        basis = p.get("basis") or "Uploaded history"
+    elif source == "json":
+        if not p.get("json"):
+            raise ValueError("No VIX history data.")
+        series = ivh.parse_nse_json(p["json"])
+    elif source == "series":
+        series = ivh._clean(tuple(x) for x in (p.get("series") or []))
+        basis = p.get("basis") or "Recorded ATM IV"
+    else:
+        raise ValueError(f"Unknown IV history source {source!r}")
+    stats = ivh.iv_stats(series, current, as_of, lookback)
+    start = ivh.parse_day(stats["end"]) - timedelta(days=lookback)
+    stats["series"] = ivh.series_json([(d, v) for d, v in series if d >= start])
+    stats["basis"] = basis
+    return stats
+
+
 ROUTES = {
     "/api/analyze": api_analyze,
     "/api/strategy": api_strategy,
     "/api/futures": api_futures,
     "/api/price": api_price,
+    "/api/ivhistory": api_ivhistory,
 }
 
 

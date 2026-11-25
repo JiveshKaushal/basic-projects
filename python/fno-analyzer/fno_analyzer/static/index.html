@@ -186,6 +186,12 @@ td.strike { text-align: center; font-weight: 600; background: var(--surface-2); 
 .mini .mh { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
 .mini .mh h3 { margin: 0; font-size: 14px; }
 .mini .ms { font-size: 12px; color: var(--text-2); margin: 2px 0 6px; font-variant-numeric: tabular-nums; }
+.ivp-select { width: 190px; flex: none; height: 32px; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+.ivp-gauge { position: relative; height: 8px; border-radius: 4px; margin-top: 8px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 18%, transparent), color-mix(in srgb, var(--accent) 70%, transparent)); }
+.ivp-gauge > i { position: absolute; top: -4px; width: 3px; height: 16px; border-radius: 2px; background: var(--text); transform: translateX(-1px); }
+.ivp-scale { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-2); margin-top: 4px; }
+.linkish { border: 0; background: none; color: var(--accent); cursor: pointer; padding: 0; font: inherit; font-size: 12px; }
 .disclaimer { margin-top: 18px; color: var(--text-2); font-size: 12px; }
 .muted { color: var(--text-2); }
 .empty { color: var(--text-2); text-align: center; padding: 40px 0; }
@@ -331,6 +337,26 @@ td.strike { text-align: center; font-weight: 600; background: var(--surface-2); 
         <p class="sub-title">Probability the price finishes inside each range (lognormal, ATM IV)</p>
         <div id="range-box"></div>
       </div>
+    </div>
+    <div class="card" style="margin-top:12px" id="ivp-card">
+      <div class="card-head">
+        <div>
+          <h2>Historical IV percentile</h2>
+          <p class="sub-title" id="ivp-basis">How today's implied volatility compares with the past year</p>
+        </div>
+        <div class="controls" style="gap:8px;align-items:center">
+          <label for="ivp-source" class="muted" style="font-size:12px">History</label>
+          <select id="ivp-source" class="ivp-select">
+            <option value="auto">Auto</option>
+            <option value="vix">India VIX (NSE)</option>
+            <option value="recorded">My recorded ATM IV</option>
+            <option value="upload">Upload history file</option>
+          </select>
+          <input type="file" id="ivp-file" accept=".csv,.json,text/csv,application/json" class="hidden" style="max-width:220px;font-size:12px">
+        </div>
+      </div>
+      <div id="ivp-body"><div class="empty">Analyze a chain to see IV history</div></div>
+      <div id="ivp-foot" class="sub-title" style="margin:10px 0 0"></div>
     </div>
   </section>
 
@@ -526,7 +552,7 @@ $$("nav.tabs button").forEach(b => b.addEventListener("click", () => {
 // static host such as GitHub Pages — the same Python package running in the browser
 // via Pyodide (WebAssembly). Mode is detected once at startup.
 const PYODIDE_URL = "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/";
-const PY_FILES = ["__init__", "api", "chain", "config", "futures", "insights", "presets", "pricing", "sample", "strategy"];
+const PY_FILES = ["__init__", "api", "chain", "config", "futures", "insights", "ivhistory", "presets", "pricing", "sample", "strategy"];
 let MODE = null;         // "server" | "browser"
 let pyCall = null;
 
@@ -616,13 +642,30 @@ function fnoNseBridge(DASH) {
     }
     throw new Error(errors.join("; "));
   }
+  async function loadVix(days) {
+    var DAY = 864e5, rows = [], stop = Date.now() - days * DAY, to = Date.now();
+    function f(t) { var d = new Date(t); return ("0" + d.getDate()).slice(-2) + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + d.getFullYear(); }
+    while (to > stop) {
+      var from = Math.max(to - 89 * DAY, stop);
+      var p = await getJSON("/api/historical/vixhistory?from=" + f(from) + "&to=" + f(to));
+      rows = rows.concat((p && p.data) || []);
+      to = from - DAY;
+    }
+    if (!rows.length) throw new Error("NSE returned no India VIX history");
+    return { data: rows };
+  }
   var state = window.__fnoBridge;
-  if (!state) {
-    state = window.__fnoBridge = { linked: false };
+  if (!state || state.v !== 2) {
+    state = window.__fnoBridge = { linked: false, v: 2 };
     window.addEventListener("message", function (ev) {
       if (ev.origin !== dashOrigin || !ev.data) return;
       var d = ev.data, src = ev.source;
-      if (d.type === "fno-hello") { state.linked = true; src.postMessage({ type: "fno-bridge" }, dashOrigin); return; }
+      if (d.type === "fno-hello") { state.linked = true; src.postMessage({ type: "fno-bridge", v: 2 }, dashOrigin); return; }
+      if (d.type === "fno-fetch-vix") {
+        loadVix(d.days || 365).then(function (payload) { src.postMessage({ type: "fno-vix", id: d.id, payload: payload }, dashOrigin); },
+          function (e) { src.postMessage({ type: "fno-error", id: d.id, error: String(e && e.message || e) }, dashOrigin); });
+        return;
+      }
       if (d.type !== "fno-fetch") return;
       load(d.symbol, d.expiry).then(function (r) {
         r.type = "fno-data"; r.id = d.id; r.fetchedAt = new Date().toISOString();
@@ -647,7 +690,7 @@ function fnoNseBridge(DASH) {
 }
 
 const NSE_ORIGIN = "https://www.nseindia.com";
-const bridge = { win: null, linked: false, pending: new Map(), lastFetch: null };
+const bridge = { win: null, linked: false, pending: new Map(), lastFetch: null, version: 0 };
 function bookmarkletCode() {
   const dash = location.origin + location.pathname;
   return "javascript:" + encodeURIComponent("(" + fnoNseBridge.toString() + ")(" + JSON.stringify(dash) + ")");
@@ -662,6 +705,7 @@ addEventListener("message", ev => {
   const d = ev.data;
   if (d.type === "fno-bridge") {
     bridge.win = ev.source; bridge.linked = true;
+    bridge.version = Math.max(bridge.version, d.v || 1);
     setLiveStatus("on", "Connected to your nseindia.com tab — keep it open.");
     syncSource();
     return;
@@ -669,9 +713,9 @@ addEventListener("message", ev => {
   const p = bridge.pending.get(d.id);
   if (!p) return;
   bridge.pending.delete(d.id);
-  if (d.type === "fno-data") p.ok(d); else p.bad(new Error("NSE: " + d.error));
+  if (d.type === "fno-data" || d.type === "fno-vix") p.ok(d); else p.bad(new Error("NSE: " + d.error));
 });
-function bridgeFetch(symbol, expiry) {
+function bridgeRequest(msg, timeoutMs = 30000) {
   if (!bridge.linked || !bridge.win || bridge.win.closed) {
     bridge.linked = false;
     return Promise.reject(new Error("Not connected to an NSE tab. Open nseindia.com/option-chain and click the “F&O → Dashboard” bookmark (setup steps below)."));
@@ -679,12 +723,13 @@ function bridgeFetch(symbol, expiry) {
   return new Promise((ok, bad) => {
     const id = Math.random().toString(36).slice(2);
     bridge.pending.set(id, { ok, bad });
-    bridge.win.postMessage({ type: "fno-fetch", id, symbol, expiry }, NSE_ORIGIN);
+    bridge.win.postMessage({ ...msg, id }, NSE_ORIGIN);
     setTimeout(() => {
-      if (bridge.pending.delete(id)) bad(new Error("The NSE tab didn't answer within 30 s. Reload nseindia.com/option-chain and click the bookmark again."));
-    }, 30000);
+      if (bridge.pending.delete(id)) bad(new Error(`The NSE tab didn't answer within ${timeoutMs / 1000} s. Reload nseindia.com/option-chain and click the bookmark again.`));
+    }, timeoutMs);
   });
 }
+const bridgeFetch = (symbol, expiry) => bridgeRequest({ type: "fno-fetch", symbol, expiry });
 function initBridge() {
   const link = $("#bm-link");
   link.href = bookmarkletCode();
@@ -889,7 +934,7 @@ $$("[data-oi]").forEach(b => b.addEventListener("click", () => {
 }));
 
 // ---------- line chart (shared by IV smile and payoff) ----------
-function lineChart(box, { series, xFmt, yFmt, height, zeroLine, bands = [], markers = [], fills, ariaLabel, tipTitle, xDomain, yDomain, compact }) {
+function lineChart(box, { series, xFmt, yFmt, height, zeroLine, bands = [], markers = [], fills, ariaLabel, tipTitle, xDomain, yDomain, compact, hlines = [] }) {
   box.replaceChildren();
   const W = box.clientWidth || 600, H = height || Math.max(220, Math.min(320, W * 0.48));
   const m = compact ? { t: 8, r: 8, b: 24, l: 46 } : { t: 14, r: 12, b: 30, l: 58 };
@@ -930,6 +975,18 @@ function lineChart(box, { series, xFmt, yFmt, height, zeroLine, bands = [], mark
   for (const s of series) {
     const d = s.pts.map((p, i) => `${i ? "L" : "M"}${x(p[0])},${y(p[1])}`).join(" ");
     svg.append(sv("path", { d, fill: "none", stroke: s.color, "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }));
+  }
+  const labelYs = [];
+  for (const h of hlines) {
+    if (h.y < ylo || h.y > yhi) continue;
+    svg.append(sv("line", { x1: m.l, x2: W - m.r, y1: y(h.y), y2: y(h.y), stroke: h.color, "stroke-dasharray": h.dash || "4 3", "stroke-width": 1.25 }));
+    if (!h.label) continue;
+    // put the label above its line, or below it if that would collide with an earlier label
+    let ly = y(h.y) - 5;
+    if (labelYs.some(o => Math.abs(o - ly) < 13)) ly = y(h.y) + 13;
+    labelYs.push(ly);
+    const tx = sv("text", { x: W - m.r - 4, y: ly, "text-anchor": "end", "paint-order": "stroke", stroke: css("--surface"), "stroke-width": 3 });
+    tx.textContent = h.label; tx.style.fill = h.color; svg.append(tx);
   }
   for (const mk of markers) {
     if (mk.x < x.inv(m.l) || mk.x > x.inv(W - m.r)) continue;
@@ -992,6 +1049,7 @@ function renderOverview() {
     kpi("Max pain", num(d.max_pain), `${((d.max_pain - d.spot) / d.spot * 100).toFixed(2)}% from spot`),
     kpi("Support · resistance", `${num(d.support)} · ${num(d.resistance)}`, "Highest put OI · call OI"),
     kpi("Bias", arrow + d.bias, `Signal score ${d.score > 0 ? "+" : ""}${d.score}`, biasCls),
+    Object.assign(kpi("IV percentile (1y)", "…", "Loading history"), { id: "kpi-ivp" }),
   );
   $("#bias").replaceChildren(el("span", { class: "pill " + biasCls }, arrow + d.bias));
   $("#insights").replaceChildren(...d.insights.map(t => el("li", {}, t)), el("li", {}, d.hint));
@@ -1287,19 +1345,165 @@ function prefillTools() {
 }
 $$("input").forEach(i => i.addEventListener("input", () => { i.dataset.touched = "1"; }));
 
+// ---------- historical IV percentile ----------
+const IVREC_KEY = "fno-iv-rec", VIXCACHE_KEY = "fno-vix-cache";
+const readStore = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch (e) { return d; } };
+const writeStore = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+const todayIST = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+const fmtDay = iso => new Date(iso + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+let ivpUpload = null, ivpSeq = 0, lastIVP = null;
+
+// One ATM IV reading per symbol per day, kept in this browser (only for real, non-sample data).
+function recordIV(d) {
+  if (!d || d.sample || !(d.atm_iv > 0)) return;
+  const rec = readStore(IVREC_KEY, {});
+  const s = rec[d.symbol] || (rec[d.symbol] = {});
+  s[d.as_of] = +(d.atm_iv * 100).toFixed(2);
+  const days = Object.keys(s).sort();
+  while (days.length > 800) delete s[days.shift()];
+  writeStore(IVREC_KEY, rec);
+}
+const recordedSeries = sym => Object.entries(readStore(IVREC_KEY, {})[sym] || {}).sort((a, b) => a[0] < b[0] ? -1 : 1);
+function vixCache() { const c = readStore(VIXCACHE_KEY, null); return c && c.day === todayIST() && c.series?.length > 20 ? c : null; }
+
+async function vixRequest() {
+  const c = vixCache();
+  if (c) return { source: "series", series: c.series, basis: "India VIX" };
+  if (MODE === "server") return { source: "live" };
+  if (bridge.linked) {
+    if (bridge.version < 2) throw new Error("Your bookmark is an older version without VIX history. Choose Data source → Live NSE, drag the “F&O → Dashboard” button to your bookmarks bar again (replace the old one), then click it on nseindia.com.");
+    const r = await bridgeRequest({ type: "fno-fetch-vix", days: 365 }, 60000);
+    return { source: "json", json: r.payload };
+  }
+  throw new Error("India VIX history comes from NSE. Connect your NSE tab with the bookmark (Data source → Live NSE), or download the history CSV from nseindia.com (Market Data → Historical India VIX) and choose “Upload history file”.");
+}
+
+function ivpFooter() {
+  const d = DATA, n = recordedSeries(d.symbol).length;
+  const foot = $("#ivp-foot");
+  const parts = [`${d.symbol}: ${n} day${n === 1 ? "" : "s"} of ATM IV recorded in this browser`];
+  foot.replaceChildren(...[parts[0], n ? " · " : "",
+    n ? el("button", { class: "linkish", type: "button", onclick: () => {
+      const rows = ["date,atm_iv", ...recordedSeries(d.symbol).map(([k, v]) => `${k},${v}`)].join("\n");
+      const a = el("a", { href: URL.createObjectURL(new Blob([rows], { type: "text/csv" })), download: `atm-iv-${d.symbol}.csv` });
+      document.body.append(a); a.click(); a.remove();
+    } }, "Download CSV") : null,
+    n ? " · " : "",
+    n ? el("button", { class: "linkish", type: "button", onclick: () => {
+      if (!confirm(`Delete the ${n} recorded ATM IV readings for ${d.symbol} from this browser?`)) return;
+      const rec = readStore(IVREC_KEY, {}); delete rec[d.symbol]; writeStore(IVREC_KEY, rec); loadIVP();
+    } }, "Clear") : null,
+    ". Recorded automatically each day you analyse live, CSV or JSON data (not sample data)."].filter(x => x != null && x !== ""));
+}
+
+async function loadIVP() {
+  if (!DATA) return;
+  const seq = ++ivpSeq, d = DATA, body = $("#ivp-body");
+  let want = $("#ivp-source").value;
+  $("#ivp-file").classList.toggle("hidden", want !== "upload");
+  ivpFooter();
+  const recorded = recordedSeries(d.symbol);
+  const atm = +(d.atm_iv * 100).toFixed(2);
+  if (want === "auto") {
+    const canVix = MODE === "server" || bridge.linked || !!vixCache();
+    const isIndex = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "NIFTYNXT50"].includes(d.symbol);
+    want = d.sample ? "sample" : canVix && (isIndex || recorded.length < 20) ? "vix" : recorded.length >= 2 ? "recorded" : "vix";
+  }
+  body.replaceChildren(el("div", { class: "empty" }, el("span", { class: "spin" }), " Loading IV history…"));
+  try {
+    let req;
+    if (want === "sample") req = { source: "sample", current: atm, as_of: d.as_of };
+    else if (want === "recorded") {
+      if (recorded.length < 2) throw new Error(`Only ${recorded.length} day${recorded.length === 1 ? "" : "s"} of ${d.symbol} ATM IV recorded so far. The dashboard saves one reading per day whenever you analyse real (non-sample) data, so this fills in over time. Meanwhile use India VIX or upload a history file.`);
+      req = { source: "series", series: recorded, current: atm, as_of: d.as_of, basis: `Your recorded ATM IV — ${d.symbol}` };
+    } else if (want === "upload") {
+      if (!ivpUpload) throw new Error("Choose a file: the India VIX history CSV from nseindia.com, a saved NSE VIX JSON, or any CSV with date and iv columns.");
+      req = /\.json$/i.test(ivpUpload.name) ? { source: "json", json: ivpUpload.text } : { source: "csv", csv: ivpUpload.text, basis: "Uploaded: " + ivpUpload.name };
+    } else req = await vixRequest();
+    const st = await api("/api/ivhistory", req);
+    if (seq !== ivpSeq) return;
+    if (want === "vix" && req.source !== "series") writeStore(VIXCACHE_KEY, { day: todayIST(), series: st.series });
+    st.kind = want;
+    renderIVP(st);
+  } catch (e) {
+    if (seq !== ivpSeq) return;
+    lastIVP = null;
+    body.replaceChildren(el("div", { class: "notice", style: "margin:0" }, e.message));
+    const t = $("#kpi-ivp");
+    if (t) { t.querySelector(".value").textContent = "—"; t.querySelector(".sub").textContent = "No history yet"; }
+  }
+}
+
+function renderIVP(st) {
+  lastIVP = st;
+  const d = DATA, body = $("#ivp-body");
+  const vix = st.kind === "vix" || /VIX/.test(st.basis);
+  const notes = [`${st.basis} · ${st.days} ${st.kind === "recorded" ? "recorded" : "trading"} days, ${fmtDay(st.start)} – ${fmtDay(st.end)}.`];
+  if (st.days < 120) notes.push("A short history makes the percentile less reliable.");
+  if (vix && st.kind !== "sample") {
+    notes.push(`India VIX is NIFTY's 30-day implied volatility; today's ATM IV for the ${fmtDay(d.expiry)} expiry is ${pct(d.atm_iv)}.`);
+    if (!["NIFTY", "FINNIFTY", "NIFTYNXT50"].includes(d.symbol)) notes.push(`VIX tracks NIFTY, not ${d.symbol} — use “My recorded ATM IV” for a symbol-specific view.`);
+  }
+  if (st.kind === "sample") notes.push("Sample data: the history is synthetic.");
+  $("#ivp-basis").textContent = notes.join(" ");
+  const p = Math.round(st.percentile);
+  body.replaceChildren(
+    el("div", { class: "stats", style: "margin-top:0" },
+      el("div", { class: "stat" }, el("div", { class: "label" }, "IV percentile"),
+        el("div", { class: "value", style: "font-size:22px" }, String(p), " ", el("span", { class: "pill" }, st.regime)),
+        el("div", { class: "ivp-gauge", role: "img", "aria-label": `IV percentile ${p} of 100` }, el("i", { style: `left:${p}%` })),
+        el("div", { class: "ivp-scale" }, el("span", {}, "0 · cheap"), el("span", {}, "100 · expensive"))),
+      stat("IV rank", String(Math.round(st.rank))),
+      stat("Current", st.current.toFixed(2)),
+      stat("Range", `${st.low.toFixed(1)} – ${st.high.toFixed(1)}`),
+      stat("Average", st.mean.toFixed(2))),
+    el("p", { style: "margin:4px 0 10px" }, st.read),
+    el("div", { class: "chart", id: "ivp-chart" }));
+  const t = $("#kpi-ivp");
+  if (t) { t.querySelector(".value").textContent = `${p} · ${st.regime}`; t.querySelector(".sub").textContent = `${vix ? "India VIX" : "ATM IV"} · rank ${Math.round(st.rank)}`; }
+  $$("#insights li.ivp").forEach(li => li.remove());
+  $("#insights").append(el("li", { class: "ivp" }, "IV history: " + st.read));
+  drawIVPChart();
+}
+
+function drawIVPChart() {
+  const box = $("#ivp-chart");
+  if (!box || !lastIVP || !box.isConnected || $("[data-panel=overview]").classList.contains("hidden")) return;
+  const st = lastIVP;
+  const mon = new Intl.DateTimeFormat("en-IN", { month: "short", year: "2-digit" });
+  lineChart(box, {
+    series: [{ name: st.kind === "recorded" ? "ATM IV" : "IV", color: css("--accent"), pts: st.series.map(([dd, v]) => [Date.parse(dd + "T00:00:00"), v]) }],
+    xFmt: v => mon.format(new Date(v)), yFmt: (v, full) => full ? v.toFixed(2) : v.toFixed(0),
+    hlines: [{ y: st.current, color: css("--text"), label: `Now ${st.current.toFixed(1)}` },
+             { y: st.mean, color: css("--text-2"), dash: "2 3", label: `Avg ${st.mean.toFixed(1)}` }],
+    height: 220, ariaLabel: `Implied volatility over the past year; now ${st.current.toFixed(1)}, percentile ${Math.round(st.percentile)}`,
+    tipTitle: v => fmtDay(new Date(v).toLocaleDateString("en-CA")),
+  });
+}
+
+$("#ivp-source").addEventListener("change", loadIVP);
+$("#ivp-file").addEventListener("change", async () => {
+  const f = $("#ivp-file").files[0];
+  if (!f) return;
+  ivpUpload = { name: f.name, text: await readFile(f) };
+  loadIVP();
+});
+
 function renderAll() {
   if (!DATA) return;
+  recordIV(DATA);
   if (DATA.disclaimer) $("#disclaimer").textContent = DATA.disclaimer;
   renderOverview();
   renderStrategies();
   renderChain();
   prefillTools();
   redraw();
+  loadIVP();
 }
 function redraw() {
   if (!DATA) return;
   const vis = p => !$(`[data-panel=${p}]`).classList.contains("hidden");
-  if (vis("overview")) { drawOI(); drawIV(); }
+  if (vis("overview")) { drawOI(); drawIV(); drawIVPChart(); }
   if (vis("strategies")) {
     if (stratView === "charts") renderPayoffGrid();
     else renderDetail($("#strat-detail"), DATA.strategies[selectedStrategy], DATA, true);

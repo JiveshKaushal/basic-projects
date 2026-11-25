@@ -57,6 +57,12 @@ The dashboard has five tabs:
 - **Overview** — key numbers (spot, ATM IV, PCR, max pain, support/resistance, bias), an
   open-interest-by-strike chart (total or today's change) with spot and max pain marked,
   the volatility smile, the market read, and the expected range to expiry.
+- **Historical IV percentile** (Overview) — IV percentile, IV rank, range and average over
+  the past year with a history chart and a plain-English read (cheap vs expensive options).
+  History comes from **India VIX** (fetched from NSE via the bookmark or the local server,
+  or the CSV you can download from nseindia.com → Historical India VIX), or from the
+  **ATM IV the dashboard records** in your browser each day you analyse real data — that
+  works for any symbol and fills in over time. An uploaded `date,iv` CSV also works.
 - **Strategies & POP** — the preset strategies ranked by probability of profit (sortable);
   click one to see its payoff chart with profit/loss zones, breakevens and the 1-SD range.
   Switch to **All payoff charts** to see every strategy's payoff side by side on the same
@@ -117,6 +123,17 @@ python3 -m fno_analyzer strategy --symbol NIFTY --spot 24350 --iv 12.5 --days 6 
 python3 -m fno_analyzer futures --symbol NIFTY --spot 24350 --future 24460 --days 20 \
     --price-change 85 --oi-change 120000
 ```
+
+### IV percentile
+
+```bash
+python3 -m fno_analyzer ivp --csv vix_history.csv          # NSE India VIX CSV download
+python3 -m fno_analyzer ivp --live                          # fetch India VIX from NSE
+python3 -m fno_analyzer ivp --csv my_iv.csv --current 14.2  # rank a specific IV
+```
+
+IV percentile = share of days in the past year with IV *below* today's; IV rank = where
+today's IV sits between the year's low (0) and high (100).
 
 ### Single option
 
