@@ -170,6 +170,15 @@ td.strike { text-align: center; font-weight: 600; background: var(--surface-2); 
 .pop-cell { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
 .pop-bar { width: 60px; height: 6px; background: var(--surface-2); border-radius: 3px; overflow: hidden; }
 .pop-bar > div { height: 100%; background: var(--accent); }
+.help { margin-top: 12px; padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); }
+.help h3 { margin: 0 0 4px; font-size: 14px; }
+.help ol { margin: 8px 0; padding-left: 20px; display: grid; gap: 8px; }
+.help a { color: var(--accent); }
+.bm { display: inline-block; margin: 0 6px; padding: 4px 10px; border-radius: 999px; background: var(--accent); color: var(--accent-ink) !important; font-weight: 600; text-decoration: none; cursor: grab; }
+.live-status { margin-top: 12px; padding: 8px 12px; border-radius: 8px; font-size: 13px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: var(--surface-2); }
+.live-status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-2); }
+.live-status.on .dot { background: var(--good); }
+.live-status.off .dot { background: var(--bad); }
 .disclaimer { margin-top: 18px; color: var(--text-2); font-size: 12px; }
 .muted { color: var(--text-2); }
 .empty { color: var(--text-2); text-align: center; padding: 40px 0; }
@@ -219,6 +228,16 @@ td.strike { text-align: center; font-weight: 600; background: var(--surface-2); 
         <label for="file">File</label>
         <input id="file" type="file" accept=".csv,.json,text/csv,application/json">
       </div>
+      <div class="field md live-bridge hidden">
+        <label for="live-expiry">Expiry</label>
+        <select id="live-expiry"><option value="">Nearest</option></select>
+      </div>
+      <div class="field sm live-bridge hidden">
+        <label for="auto">Auto-refresh</label>
+        <select id="auto" style="height:34px;padding:0 8px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2);width:96px">
+          <option value="0">Off</option><option value="60">1 min</option><option value="180">3 min</option><option value="300">5 min</option>
+        </select>
+      </div>
       <div class="field sm src-sample">
         <label for="days">Days to expiry</label>
         <input id="days" type="number" min="0" value="6">
@@ -233,7 +252,21 @@ td.strike { text-align: center; font-weight: 600; background: var(--surface-2); 
       </div>
       <button class="btn" id="go" type="submit">Analyze</button>
     </form>
-    <div id="mode-note" class="notice hidden">Running fully in your browser (Python via WebAssembly — the first load downloads about 10 MB). Live NSE data needs the local version: <code>python3 -m fno_analyzer serve</code>. You can still upload a CSV or a saved NSE JSON file — nothing leaves your device.</div>
+    <div id="mode-note" class="notice hidden">Running fully in your browser (Python via WebAssembly — the first load downloads about 10 MB). Uploaded files and live data are analysed on your device and never sent anywhere else.</div>
+    <div id="live-status" class="live-status hidden" role="status"></div>
+    <div id="live-help" class="help hidden">
+      <h3>Get live NSE data — one-time setup</h3>
+      <p class="muted">Websites can't read nseindia.com directly, so a bookmark fetches the option chain from an NSE tab using your own browser session, and hands it to this page.</p>
+      <ol>
+        <li>Drag this button to your bookmarks bar (or right-click → Bookmark link):
+          <a id="bm-link" class="bm" href="#" draggable="true" title="Drag me to your bookmarks bar">📈 F&amp;O → Dashboard</a>
+          <button type="button" class="btn ghost" id="bm-copy" style="height:30px;padding:0 10px;font-size:12px">Copy bookmark code</button>
+        </li>
+        <li>Open <a href="https://www.nseindia.com/option-chain" target="_blank" rel="noopener">nseindia.com/option-chain</a> and let it load.</li>
+        <li>Click the bookmark on that page. This dashboard opens connected to the NSE tab — pick a symbol and expiry, press Analyze, or turn on auto-refresh. Keep the NSE tab open.</li>
+      </ol>
+      <p class="muted" style="margin-bottom:0">Desktop Chrome, Edge, Firefox or Safari. Allow pop-ups for nseindia.com if asked. If the tabs can't be linked, the bookmark downloads the chain as a file instead — upload it with “Upload saved NSE JSON”.</p>
+    </div>
     <div id="src-note" class="notice hidden"></div>
     <div id="err" class="error hidden" role="alert"></div>
   </section>
@@ -515,15 +548,162 @@ const NOTES = {
   csv: "CSV header: strike, call_ltp, call_iv, call_oi, call_oi_change, call_volume, put_ltp, put_iv, put_oi, put_oi_change, put_volume (IV in %, optional — solved from LTP if blank). Example: sample_chain.csv in the project's data folder.",
   json: "Open nseindia.com/option-chain in your browser, then in DevTools → Network save the response of the option-chain API request as a .json file.",
 };
+// ---------- live NSE via bookmark (static / GitHub Pages mode) ----------
+// Runs ON nseindia.com when the user clicks the bookmark. Must be self-contained:
+// it is serialised with Function.prototype.toString into a javascript: URL.
+function fnoNseBridge(DASH) {
+  var NSE = "https://www.nseindia.com", dashOrigin = new URL(DASH).origin;
+  if (location.origin !== NSE) {
+    if (confirm("This bookmark works on nseindia.com. Open the NSE option chain page now?\n\nClick the bookmark again once it has loaded.")) location.href = NSE + "/option-chain";
+    return;
+  }
+  var INDICES = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50"];
+  function getJSON(path) {
+    return fetch(NSE + path, { credentials: "include", headers: { accept: "application/json" } }).then(function (r) {
+      if (!r.ok) throw new Error("NSE returned " + r.status + " for " + path.split("?")[0]);
+      return r.json();
+    });
+  }
+  async function load(symbol, expiry) {
+    symbol = String(symbol || "NIFTY").toUpperCase().replace(/[^A-Z0-9&-]/g, "");
+    var idx = INDICES.indexOf(symbol) >= 0, errors = [], expiries = [];
+    try { expiries = (await getJSON("/api/option-chain-contract-info?symbol=" + encodeURIComponent(symbol))).expiryDates || []; }
+    catch (e) { errors.push(e.message); }
+    var exp = expiry && expiries.indexOf(expiry) >= 0 ? expiry : expiries[0];
+    var urls = [];
+    if (exp) urls.push("/api/option-chain-v3?type=" + (idx ? "Indices" : "Equity") + "&symbol=" + encodeURIComponent(symbol) + "&expiry=" + encodeURIComponent(exp));
+    urls.push("/api/option-chain-" + (idx ? "indices" : "equities") + "?symbol=" + encodeURIComponent(symbol));
+    for (var i = 0; i < urls.length; i++) {
+      try {
+        var p = await getJSON(urls[i]), recs = p.records || p;
+        if (recs && recs.data && recs.data.length) {
+          if (!expiries.length) expiries = recs.expiryDates || [];
+          return { symbol: symbol, payload: p, expiry: exp || null, expiries: expiries };
+        }
+        errors.push("no option data in " + urls[i].split("?")[0]);
+      } catch (e) { errors.push(e.message); }
+    }
+    throw new Error(errors.join("; "));
+  }
+  var state = window.__fnoBridge;
+  if (!state) {
+    state = window.__fnoBridge = { linked: false };
+    window.addEventListener("message", function (ev) {
+      if (ev.origin !== dashOrigin || !ev.data) return;
+      var d = ev.data, src = ev.source;
+      if (d.type === "fno-hello") { state.linked = true; src.postMessage({ type: "fno-bridge" }, dashOrigin); return; }
+      if (d.type !== "fno-fetch") return;
+      load(d.symbol, d.expiry).then(function (r) {
+        r.type = "fno-data"; r.id = d.id; r.fetchedAt = new Date().toISOString();
+        src.postMessage(r, dashOrigin);
+      }, function (e) { src.postMessage({ type: "fno-error", id: d.id, error: String(e && e.message || e) }, dashOrigin); });
+    });
+  }
+  state.linked = false;
+  window.open(DASH + "?nse=" + Date.now() + "#nse", "fno-dashboard");
+  setTimeout(async function () {
+    if (state.linked) return;
+    var sym = prompt("Couldn't connect to the dashboard tab automatically.\nDownload the option chain as a file to upload instead?\n\nSymbol:", "NIFTY");
+    if (!sym) return;
+    try {
+      var r = await load(sym), a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([JSON.stringify(r.payload)], { type: "application/json" }));
+      a.download = "nse-" + r.symbol + (r.expiry ? "-" + r.expiry : "") + ".json";
+      document.body.appendChild(a); a.click(); a.remove();
+      alert("Saved " + a.download + ". In the dashboard choose 'Upload saved NSE JSON' and select this file.");
+    } catch (e) { alert("NSE request failed: " + e.message); }
+  }, 10000);
+}
+
+const NSE_ORIGIN = "https://www.nseindia.com";
+const bridge = { win: null, linked: false, pending: new Map(), lastFetch: null };
+function bookmarkletCode() {
+  const dash = location.origin + location.pathname;
+  return "javascript:" + encodeURIComponent("(" + fnoNseBridge.toString() + ")(" + JSON.stringify(dash) + ")");
+}
+function setLiveStatus(kind, text) {
+  const box = $("#live-status");
+  box.className = "live-status " + kind;
+  box.replaceChildren(el("span", { class: "dot" }), el("span", {}, text));
+}
+addEventListener("message", ev => {
+  if (ev.origin !== NSE_ORIGIN || !ev.data || (bridge.win && ev.source !== bridge.win)) return;
+  const d = ev.data;
+  if (d.type === "fno-bridge") {
+    bridge.win = ev.source; bridge.linked = true;
+    setLiveStatus("on", "Connected to your nseindia.com tab — keep it open.");
+    syncSource();
+    return;
+  }
+  const p = bridge.pending.get(d.id);
+  if (!p) return;
+  bridge.pending.delete(d.id);
+  if (d.type === "fno-data") p.ok(d); else p.bad(new Error("NSE: " + d.error));
+});
+function bridgeFetch(symbol, expiry) {
+  if (!bridge.linked || !bridge.win || bridge.win.closed) {
+    bridge.linked = false;
+    return Promise.reject(new Error("Not connected to an NSE tab. Open nseindia.com/option-chain and click the “F&O → Dashboard” bookmark (setup steps below)."));
+  }
+  return new Promise((ok, bad) => {
+    const id = Math.random().toString(36).slice(2);
+    bridge.pending.set(id, { ok, bad });
+    bridge.win.postMessage({ type: "fno-fetch", id, symbol, expiry }, NSE_ORIGIN);
+    setTimeout(() => {
+      if (bridge.pending.delete(id)) bad(new Error("The NSE tab didn't answer within 30 s. Reload nseindia.com/option-chain and click the bookmark again."));
+    }, 30000);
+  });
+}
+function initBridge() {
+  const link = $("#bm-link");
+  link.href = bookmarkletCode();
+  link.addEventListener("click", e => { e.preventDefault(); alert("Drag this button to your bookmarks bar, then click it while on nseindia.com."); });
+  $("#bm-copy").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(bookmarkletCode()); $("#bm-copy").textContent = "Copied — paste as a new bookmark's URL"; }
+    catch (e) { prompt("Copy this and paste it as a new bookmark's URL:", bookmarkletCode()); }
+  });
+  if (location.hash === "#nse") {
+    history.replaceState(null, "", location.pathname);
+    $("#source").value = "live";
+    if (window.opener) {
+      window.opener.postMessage({ type: "fno-hello" }, NSE_ORIGIN);
+      setLiveStatus("", "Connecting to your NSE tab…");
+      setTimeout(() => { if (!bridge.linked) setLiveStatus("off", "Couldn't connect to the NSE tab. Your browser may isolate nseindia.com — use the file the bookmark offers to download, then “Upload saved NSE JSON”."); }, 4000);
+      return true;
+    }
+    setLiveStatus("off", "Opened from the bookmark but the NSE tab isn't reachable — the bookmark will offer the chain as a file to upload instead.");
+  }
+  return false;
+}
+let autoTimer = null;
+function syncAuto() {
+  clearInterval(autoTimer);
+  const secs = +$("#auto").value;
+  if (secs && $("#source").value === "live" && MODE === "browser") autoTimer = setInterval(() => {
+    if (bridge.linked && !document.hidden && !$("#go").disabled) $("#src-form").requestSubmit();
+  }, secs * 1000);
+}
+$("#auto").addEventListener("change", syncAuto);
+$("#live-expiry").addEventListener("change", () => $("#src-form").requestSubmit());
+// a different symbol has different expiries: go back to "Nearest"
+$("#symbol").addEventListener("change", () => { $("#live-expiry").replaceChildren(el("option", { value: "" }, "Nearest")); });
+
 function syncSource() {
   const s = $("#source").value;
   $$("[class*='src-']").forEach(e => {
     const show = [...e.classList].some(c => c === "src-" + s);
     if ([...e.classList].some(c => c.startsWith("src-"))) e.classList.toggle("hidden", !show);
   });
+  const browserLive = s === "live" && MODE === "browser";
+  if (browserLive) $$(".src-live").forEach(e => e.classList.add("hidden"));
+  $$(".live-bridge").forEach(e => e.classList.toggle("hidden", !browserLive));
+  $("#live-help").classList.toggle("hidden", !browserLive || bridge.linked);
+  $("#live-status").classList.toggle("hidden", !browserLive || !$("#live-status").textContent);
   const n = $("#src-note");
-  n.textContent = NOTES[s] || "";
-  n.classList.toggle("hidden", !NOTES[s]);
+  const note = browserLive ? "" : NOTES[s] || "";
+  n.textContent = note;
+  n.classList.toggle("hidden", !note);
+  if (typeof syncAuto === "function") syncAuto();
 }
 $("#source").addEventListener("change", syncSource);
 syncSource();
@@ -556,7 +736,22 @@ $("#src-form").addEventListener("submit", async ev => {
       if (!f) throw new Error("Choose a file to upload.");
       body[s] = await readFile(f);
     }
+    if (s === "live" && MODE === "browser") {
+      btn.replaceChildren(el("span", { class: "spin" }), " Fetching from NSE…");
+      const sel = $("#live-expiry");
+      const r = await bridgeFetch(body.symbol, sel.value || null);
+      const keep = sel.value;
+      sel.replaceChildren(...(r.expiries.length ? r.expiries : [r.expiry || ""]).map(e => el("option", { value: e }, e || "Nearest")));
+      sel.value = r.expiry && r.expiries.includes(r.expiry) ? r.expiry : keep || sel.options[0]?.value || "";
+      Object.assign(body, { source: "json", json: r.payload, symbol: r.symbol, expiry: r.expiry });
+      bridge.lastFetch = new Date(r.fetchedAt);
+      if (!pyCall) btn.replaceChildren(el("span", { class: "spin" }), " Loading Python engine…");
+    }
     DATA = await api("/api/analyze", body);
+    if (s === "live" && MODE === "browser") {
+      DATA.live_note = `Live ${DATA.symbol} · fetched ${bridge.lastFetch.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit" })} IST via your NSE tab`;
+      setLiveStatus("on", DATA.live_note + (+$("#auto").value ? ` · auto-refresh every ${$("#auto").selectedOptions[0].textContent}` : ""));
+    }
     selectedStrategy = 0;
     renderAll();
   } catch (e) {
@@ -1009,13 +1204,25 @@ function redraw() {
 let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(redraw, 150); });
 matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", redraw);
 
-// startup: pick back end, then load sample data
+// startup: pick back end, then load data
 detectMode().then(mode => {
+  let fromBookmark = false;
   if (mode === "browser") {
-    $("#source option[value=live]").remove();
+    $("#source option[value=live]").textContent = "Live NSE (via bookmark)";
     $("#mode-note").classList.remove("hidden");
+    fromBookmark = initBridge();
   }
-  $("#src-form").requestSubmit();
+  syncSource();
+  if (fromBookmark) {
+    // wait for the NSE tab to confirm the link, then fetch the default symbol
+    const t0 = Date.now();
+    const wait = setInterval(() => {
+      if (bridge.linked) { clearInterval(wait); $("#src-form").requestSubmit(); }
+      else if (Date.now() - t0 > 4000) clearInterval(wait);
+    }, 100);
+  } else if ($("#source").value !== "live") {
+    $("#src-form").requestSubmit();
+  }
 });
 })();
 </script>

@@ -23,9 +23,23 @@ Pure Python 3.8+ standard library — **no installs needed**.
 
 **https://jiveshkaushal.github.io/basic-projects/** — the dashboard running entirely in your
 browser (the Python code runs via Pyodide/WebAssembly; first load downloads ~10 MB).
-Sample data, CSV upload and saved-NSE-JSON upload all work there and nothing leaves your
-device. Live NSE fetching needs the local version below, because browsers block direct
-requests to nseindia.com.
+Sample data, CSV upload, saved-NSE-JSON upload and **live NSE data** all work there, and
+nothing leaves your device.
+
+### Live NSE data on the website (one-click bookmark)
+
+Browsers don't let one website read another (and NSE blocks non-browser traffic), so the
+site gets live data through a bookmark that runs on nseindia.com with your own session:
+
+1. On the website choose **Data source → Live NSE (via bookmark)** and drag the
+   **📈 F&O → Dashboard** button to your bookmarks bar (one time).
+2. Open [nseindia.com/option-chain](https://www.nseindia.com/option-chain) and click the bookmark.
+3. The dashboard opens linked to that NSE tab. Pick any symbol/expiry, press **Analyze**,
+   or turn on **auto-refresh** (1/3/5 min). Keep the NSE tab open.
+
+If your browser isolates the two tabs, the bookmark instead downloads the chain as a
+`.json` file — upload it with **Upload saved NSE JSON**. Works on desktop browsers.
+The local version (`serve`) can also fetch NSE directly, without the bookmark.
 
 The site is rebuilt and deployed automatically by `.github/workflows/pages.yml` whenever
 `python/fno-analyzer/` changes on `main` (tests run first). To preview the static build
